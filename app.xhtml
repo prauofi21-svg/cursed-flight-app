@@ -43,6 +43,19 @@ body{position:fixed;inset:0}
     setTimeout(applyFullscreen, 1200);
   });
 
+  /* پایش مقاوم: در هر صورت (حتی با تأخیر شبکه) استایل تمام‌صفحه تزریق می‌شود */
+  var pollCount = 0;
+  var pollTimer = setInterval(function(){
+    applyFullscreen();
+    pollCount++;
+    var done = false;
+    try{
+      var doc = frame.contentDocument;
+      done = !!(doc && doc.getElementById('fs-style') && doc.getElementById('shell'));
+    }catch(e){}
+    if(done || pollCount > 40){ clearInterval(pollTimer); }
+  }, 350);
+
   /* سورس اصلی بازی (دست‌نخورده) از CDN خوانده و داخل قاب اجرا می‌شود */
   function showErr(){
     var el = document.getElementById('err');
