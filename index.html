@@ -10,15 +10,52 @@
 html,body{margin:0;padding:0;width:100%;height:100%;background:#050307;overflow:hidden}
 body{position:fixed;inset:0}
 #frame{position:fixed;inset:0;width:100%;height:100%;border:0;display:block;background:#050307}
+#loader{position:fixed;inset:0;z-index:50;display:grid;place-items:center;background:#050307;transition:opacity .5s ease;font-family:Tahoma,Arial,sans-serif}
+#loader.done{opacity:0;pointer-events:none}
+.box{width:min(78vw,300px);text-align:center;color:#c9a9b8;direction:rtl}
+.moon{width:72px;height:72px;margin:0 auto 20px;border-radius:50%;background:radial-gradient(circle at 38% 35%,#ff5a5a,#a1122e 55%,#3d0715 100%);box-shadow:0 0 36px 9px rgba(227,24,56,.45);animation:pulse 2.2s ease-in-out infinite}
+@keyframes pulse{0%,100%{transform:scale(1)}50%{transform:scale(1.08)}}
+.t{font-size:15px;font-weight:700;margin-bottom:14px}
+.bar{height:7px;border-radius:4px;background:#1c0f18;overflow:hidden;border:1px solid #3a1626}
+.bar>i{display:block;height:100%;width:0%;border-radius:4px;background:linear-gradient(90deg,#7a1330,#e31838);transition:width .3s ease}
+.p{margin-top:10px;font-size:12px;color:#8a7080;direction:ltr}
+#retry{display:none;margin-top:16px;padding:10px 26px;border:0;border-radius:8px;background:#a91535;color:#fff;font:700 14px Tahoma;cursor:pointer}
+#retry.show{display:inline-block}
 </style>
 </head>
 <body>
 <iframe id="frame" src="game.html" allow="autoplay" title="پرواز نفرین‌شده"></iframe>
+<div id="loader">
+  <div class="box">
+    <div class="moon"></div>
+    <div class="t" id="ltext">در حال بارگذاری بازی…</div>
+    <div class="bar"><i id="fill"></i></div>
+    <div class="p" id="pct">0%</div>
+    <button id="retry">تلاش دوباره</button>
+  </div>
+</div>
 <script>
 (function(){
-  var frame=document.getElementById('frame');
+  'use strict';
+  var frame=document.getElementById('frame'),
+      loader=document.getElementById('loader'),
+      fill=document.getElementById('fill'),
+      pct=document.getElementById('pct'),
+      ltext=document.getElementById('ltext'),
+      retry=document.getElementById('retry');
 
-  /* تمام‌صفحه‌سازی بازی داخل قاب — بدون دست‌زدن به فایل اصلی بازی (game.html) */
+  /* ---------- تلگرام: یکپارچه‌سازی گاردشده ---------- */
+  var tg=(window.Telegram&&window.Telegram.WebApp)||null;
+  if(tg){
+    try{tg.ready()}catch(e){}
+    try{tg.expand()}catch(e){}
+    try{if(tg.disableVerticalSwipes)tg.disableVerticalSwipes()}catch(e){}
+    try{if(tg.setHeaderColor)tg.setHeaderColor('#050307')}catch(e){}
+    try{if(tg.setBackgroundColor)tg.setBackgroundColor('#050307')}catch(e){}
+    try{if(tg.onEvent)tg.onEvent('viewportChanged',function(){try{tg.expand()}catch(e){}})}catch(e){}
+  }
+
+  /* ---------- تمام‌صفحه‌سازی بازی داخل قاب هم‌مبدأ (بدون دست‌زدن به game.html) ---------- */
   var FS='body{padding:0!important}'
     +'.game-shell{width:100%!important;height:100%!important;max-width:none!important;max-height:none!important;border:0!important;border-radius:0!important;box-shadow:none!important}';
   function applyFullscreen(){
@@ -30,25 +67,117 @@ body{position:fixed;inset:0}
       s.id='fs-style';
       s.textContent=FS;
       doc.head.appendChild(s);
-      /* خبر دادن به بازی که ابعاد عوض شد تا کانواس را دقیق و بدون کشیدگی بکشد */
       try{doc.defaultView.dispatchEvent(new Event('resize'))}catch(e){}
     }catch(e){}
   }
   frame.addEventListener('load',function(){
-    applyFullscreen();setTimeout(applyFullscreen,300);setTimeout(applyFullscreen,1200);
+    applyFullscreen();
+    setTimeout(applyFullscreen,300);
+    setTimeout(applyFullscreen,1200);
   });
+  var pollN=0;
+  var pollFs=setInterval(function(){
+    applyFullscreen();
+    var ok=false;
+    try{var d=frame.contentDocument;ok=!!(d&&d.getElementById('fs-style')&&d.getElementById('shell'))}catch(e){}
+    if(ok||++pollN>40)clearInterval(pollFs);
+  },350);
 
-  /* یکپارچه‌سازی با تلگرام — همه فراخوانی‌ها گاردشده؛ حتی بدون SDK بازی کامل اجرا می‌شود */
-  var tg=(window.Telegram&&window.Telegram.WebApp)||null;
-  if(tg){
-    try{tg.ready()}catch(e){}
-    try{tg.expand()}catch(e){}
-    try{if(tg.disableVerticalSwipes)tg.disableVerticalSwipes()}catch(e){}
-    try{if(tg.setHeaderColor)tg.setHeaderColor('#050307')}catch(e){}
-    try{if(tg.setBackgroundColor)tg.setBackgroundColor('#050307')}catch(e){}
-    try{if(tg.requestFullscreen)tg.requestFullscreen()}catch(e){}
-    try{if(tg.onEvent)tg.onEvent('viewportChanged',function(){try{tg.expand()}catch(e){}})}catch(e){}
+  /* ---------- لودر: پایش بارگذاری تصاویر بازی از طریق Resource Timing ---------- */
+  /* فایل game.html دست‌نخورده است؛ این ورپر فقط منتظر لود شدن تصاویر می‌ماند تا بازی
+     با گرافیک کامل (نه حالت جایگزین بدون تصویر) نمایش داده شود. صداها و موسیقی
+     به‌صورت جریانی در پس‌زمینه لود می‌شوند. */
+  var MANIFEST=[
+    ['assets/blood-moon.png',584712],
+    ['assets/horror-landscape.png',1347106],
+    ['assets/ground-bar.png',465949],
+    ['assets/clouds/cloud-1.png',432327],
+    ['assets/clouds/cloud-2.png',511782],
+    ['assets/clouds/cloud-3.png',257317],
+    ['assets/clouds/cloud-4.png',415545],
+    ['assets/crow/1.png',23170],
+    ['assets/crow/2.png',28393],
+    ['assets/crow/3.png',27481],
+    ['assets/crow/4.png',33765],
+    ['assets/crow/5.png',28270],
+    ['assets/crow/b1.png',131493],
+    ['assets/crow/b2.png',131516],
+    ['assets/characters/bat-1.png',50498],
+    ['assets/characters/bat-2.png',35658],
+    ['assets/characters/bat-3.png',40782],
+    ['assets/characters/bat-4.png',44744],
+    ['assets/characters/vulture-1.png',61701],
+    ['assets/characters/vulture-2.png',64490],
+    ['assets/characters/vulture-3.png',71208],
+    ['assets/characters/vulture-4.png',43759],
+    ['assets/characters/crow-character.png',116730],
+    ['assets/characters/bat-character.png',144865],
+    ['assets/characters/vulture-character.png',202235]
+  ];
+  var TOTAL=5295496;
+  var HARD_TIMEOUT=45000;   /* حداکثر انتظار؛ بعد از آن بازی هرطور شده شروع می‌شود */
+  var STALL_TIMEOUT=12000;  /* اگر ۱۲ ثانیه پیشرفتی نبود و بیش از ۸۵٪ آمده بود، کافی است */
+  var started=Date.now(),lastProgressAt=Date.now(),lastRatio=0,finished=false;
+
+  function gamePerf(){
+    try{
+      var w=frame.contentWindow;
+      return (w&&w.performance&&w.performance.getEntriesByType)?w.performance.getEntriesByType('resource'):[];
+    }catch(e){return[]}
   }
+  function computeProgress(){
+    var entries=gamePerf(),done=0,bytes=0;
+    for(var i=0;i<MANIFEST.length;i++){
+      var url=MANIFEST[i][0],hit=false;
+      for(var j=0;j<entries.length;j++){
+        var e=entries[j];
+        if(e.name.slice(-url.length)===url&&(e.transferSize>0||e.decodedBodySize>0||e.encodedBodySize>0)){hit=true;break}
+      }
+      if(hit){done++;bytes+=MANIFEST[i][1]}
+    }
+    return{done:done,ratio:bytes/TOTAL};
+  }
+  function updateBar(r){
+    var p=Math.min(100,Math.round(r.ratio*100));
+    fill.style.width=p+'%';
+    pct.textContent=p+'%';
+  }
+  function finish(ok,ratio){
+    if(finished)return;
+    finished=true;
+    clearInterval(monitor);
+    if(ok){
+      loader.classList.add('done');
+      setTimeout(function(){loader.style.display='none'},600);
+      setTimeout(applyFullscreen,50);
+      setTimeout(applyFullscreen,400);
+    }else{
+      ltext.textContent='اتصال کند است — لطفاً دوباره تلاش کنید';
+      retry.classList.add('show');
+    }
+  }
+  retry.onclick=function(){location.reload()};
+
+  var monitor=setInterval(function(){
+    var r=computeProgress();
+    updateBar(r);
+    if(r.done===MANIFEST.length){finish(true,r.ratio);return}
+    if(r.ratio>lastRatio){lastRatio=r.ratio;lastProgressAt=Date.now()}
+    var waited=Date.now()-started;
+    if(waited>HARD_TIMEOUT){finish(r.ratio>=0.6,r.ratio);return}
+    if(waited>STALL_TIMEOUT&&r.ratio>0.85&&Date.now()-lastProgressAt>STALL_TIMEOUT){finish(true,r.ratio)}
+  },250);
+
+  /* اگر خود بازی بالا نیامد (مثلاً خطای شبکه در game.html) */
+  setTimeout(function(){
+    if(finished)return;
+    var booted=false;
+    try{booted=!!(frame.contentDocument&&frame.contentDocument.getElementById('shell'))}catch(e){}
+    if(!booted){finished=true;clearInterval(monitor);ltext.textContent='خطا در بارگذاری بازی';retry.classList.add('show')}
+  },15000);
+
+  /* محافظ نهایی: زیر هیچ شرایطی لودر برای همیشه نمی‌ماند */
+  setTimeout(function(){finish(true,1)},HARD_TIMEOUT+4000);
 })();
 </script>
 </body>
