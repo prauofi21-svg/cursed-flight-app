@@ -1,0 +1,23 @@
+name: Welcome bot
+
+# هر ۵ دقیقه صف تلگرام بررسی می‌شود؛ آپدیت‌های تازه (بازیکن جدید/دعوت) تا ۲۴ ساعت
+# در صف می‌مانند، پس هیچ خوش‌آمدی از دست نمی‌رود حتی اگر اجرایی با تأخیر بیاید.
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch: {}
+
+concurrency:
+  group: welcome-bot
+  cancel-in-progress: false
+
+jobs:
+  poll:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - name: Poll updates and welcome new players
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+        run: python3 bot/handler.py
